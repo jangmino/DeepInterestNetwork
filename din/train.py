@@ -8,7 +8,7 @@ import sys
 from input import DataInput, DataInputTest
 from model import Model
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 random.seed(1234)
 np.random.seed(1234)
 tf.set_random_seed(1234)
