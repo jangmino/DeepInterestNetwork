@@ -45,7 +45,7 @@ class Model(object):
         tf.nn.embedding_lookup(cate_emb_w, hc),
         ], axis=2)
 
-    hist =attention(i_emb, h_emb, self.sl)
+    hist =attention(i_emb, h_emb, self.sl) # [B, 1, H]
     #-- attention end ---
     
     hist = tf.layers.batch_normalization(inputs = hist)
@@ -126,7 +126,6 @@ class Model(object):
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
     self.train_op = self.opt.apply_gradients(
         zip(clip_gradients, trainable_params), global_step=self.global_step)
-
 
   def train(self, sess, uij, l):
     loss, _ = sess.run([self.loss, self.train_op], feed_dict={

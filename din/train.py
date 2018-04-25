@@ -89,6 +89,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
   sess.run(tf.global_variables_initializer())
   sess.run(tf.local_variables_initializer())
 
+#  writer = tf.summary.FileWriter('log', sess.graph)
+#  writer.close()
+
   print('test_gauc: %.4f\t test_auc: %.4f' % _eval(sess, model))
   sys.stdout.flush()
   lr = 1.0
