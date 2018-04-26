@@ -85,12 +85,12 @@ def _eval(sess, model):
 gpu_options = tf.GPUOptions(allow_growth=True)
 with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 
-  model = Model(user_count, item_count, cate_count, cate_list)
+  model = Model(user_count, item_count, cate_count, cate_list, use_dice=True)
   sess.run(tf.global_variables_initializer())
   sess.run(tf.local_variables_initializer())
 
-#  writer = tf.summary.FileWriter('log', sess.graph)
-#  writer.close()
+  writer = tf.summary.FileWriter('log', sess.graph)
+  writer.close()
 
   print('test_gauc: %.4f\t test_auc: %.4f' % _eval(sess, model))
   sys.stdout.flush()

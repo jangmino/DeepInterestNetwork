@@ -4,7 +4,7 @@ from Dice import dice
 
 class Model(object):
 
-  def __init__(self, user_count, item_count, cate_count, cate_list):
+  def __init__(self, user_count, item_count, cate_count, cate_list, use_dice=False):
 
     self.u = tf.placeholder(tf.int32, [None,]) # [B]
     self.i = tf.placeholder(tf.int32, [None,]) # [B]
@@ -13,6 +13,7 @@ class Model(object):
     self.hist_i = tf.placeholder(tf.int32, [None, None]) # [B, T]
     self.sl = tf.placeholder(tf.int32, [None,]) # [B]
     self.lr = tf.placeholder(tf.float64, [])
+    self.phase = tf.placeholder(tf.bool, name="pholder_phase")
 
     hidden_units = 128
 
@@ -47,8 +48,8 @@ class Model(object):
 
     hist =attention(i_emb, h_emb, self.sl) # [B, 1, H]
     #-- attention end ---
-    
-    hist = tf.layers.batch_normalization(inputs = hist)
+
+    hist = tf.layers.batch_normalization(inputs=hist, name='bn_hist', training=self.phase)
     hist = tf.reshape(hist, [-1, hidden_units])
     hist = tf.layers.dense(hist, hidden_units)
 
@@ -58,20 +59,29 @@ class Model(object):
     print(j_emb.get_shape().as_list())
     #-- fcn begin -------
     din_i = tf.concat([u_emb, i_emb], axis=-1)
-    din_i = tf.layers.batch_normalization(inputs=din_i, name='b1')
-    d_layer_1_i = tf.layers.dense(din_i, 80, activation=tf.nn.sigmoid, name='f1')
-    #if u want try dice change sigmoid to None and add dice layer like following two lines. You can also find model_dice.py in this folder.
-    #d_layer_1_i = tf.layers.dense(din_i, 80, activation=None, name='f1')
-    #d_layer_1_i = dice(d_layer_1_i, name='dice_1_i')
-    d_layer_2_i = tf.layers.dense(d_layer_1_i, 40, activation=tf.nn.sigmoid, name='f2')
-    #d_layer_2_i = dice(d_layer_2_i, name='dice_2_i')
+    din_i = tf.layers.batch_normalization(inputs=din_i, name='bn_din', training=self.phase)
+    if use_dice:
+      d_layer_1_i = tf.layers.dense(din_i, 80, activation=None, name='f1')
+      d_layer_1_i = dice(d_layer_1_i, name='dice_1_i', training=self.phase, trainable=True)
+      d_layer_2_i = tf.layers.dense(d_layer_1_i, 40, activation=None, name='f2')
+      d_layer_2_i = dice(d_layer_2_i, name='dice_2_i', training=self.phase, trainable=True)
+    else:
+      d_layer_1_i = tf.layers.dense(din_i, 80, activation=tf.nn.sigmoid, name='f1')
+      d_layer_2_i = tf.layers.dense(d_layer_1_i, 40, activation=tf.nn.sigmoid, name='f2')
+
     d_layer_3_i = tf.layers.dense(d_layer_2_i, 1, activation=None, name='f3')
+
     din_j = tf.concat([u_emb, j_emb], axis=-1)
-    din_j = tf.layers.batch_normalization(inputs=din_j, name='b1', reuse=True)
-    d_layer_1_j = tf.layers.dense(din_j, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
-    #d_layer_1_j = dice(d_layer_1_j, name='dice_1_j')
-    d_layer_2_j = tf.layers.dense(d_layer_1_j, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
-    #d_layer_2_j = dice(d_layer_2_j, name='dice_2_j')
+    din_j = tf.layers.batch_normalization(inputs=din_j, name='bn_din', reuse=True, training=self.phase, trainable=False)
+    if use_dice:
+      d_layer_1_j = tf.layers.dense(din_j, 80, activation=None, name='f1', reuse=True)
+      d_layer_1_j = dice(d_layer_1_j, name='dice_1_i', training=self.phase, trainable=False, reuse=True)
+      d_layer_2_j = tf.layers.dense(d_layer_1_j, 40, activation=None, name='f2', reuse=True)
+      d_layer_2_j = dice(d_layer_2_j, name='dice_2_i', training=self.phase, trainable=False, reuse=True)
+    else:
+      d_layer_1_j = tf.layers.dense(din_j, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
+      d_layer_2_j = tf.layers.dense(d_layer_1_j, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
+
     d_layer_3_j = tf.layers.dense(d_layer_2_j, 1, activation=None, name='f3', reuse=True)
     d_layer_3_i = tf.reshape(d_layer_3_i, [-1])
     d_layer_3_j = tf.reshape(d_layer_3_j, [-1])
@@ -87,11 +97,18 @@ class Model(object):
     all_emb = tf.expand_dims(all_emb, 0)
     all_emb = tf.tile(all_emb, [512, 1, 1])
     din_all = tf.concat([u_emb_all, all_emb], axis=-1)
-    din_all = tf.layers.batch_normalization(inputs=din_all, name='b1', reuse=True)
-    d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
-    #d_layer_1_all = dice(d_layer_1_all, name='dice_1_all')
-    d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
-    #d_layer_2_all = dice(d_layer_2_all, name='dice_2_all')
+    din_all = tf.layers.batch_normalization(inputs=din_all, name='bn_din', reuse=True, training=self.phase,
+                                            trainable=False)
+
+    if use_dice:
+      d_layer_1_all = tf.layers.dense(din_all, 80, activation=None, name='f1', reuse=True)
+      d_layer_1_all = dice(d_layer_1_all, name='dice_1_i', training=self.phase, trainable=False, reuse=True)
+      d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=None, name='f2', reuse=True)
+      d_layer_2_all = dice(d_layer_2_all, name='dice_2_i', training=self.phase, trainable=False, reuse=True)
+    else:
+      d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
+      d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
+
     d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3', reuse=True)
     d_layer_3_all = tf.reshape(d_layer_3_all, [-1, item_count])
     self.logits_all = tf.sigmoid(item_b + d_layer_3_all)
@@ -124,7 +141,10 @@ class Model(object):
     self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
-    self.train_op = self.opt.apply_gradients(
+
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+      self.train_op = self.opt.apply_gradients(
         zip(clip_gradients, trainable_params), global_step=self.global_step)
 
   def train(self, sess, uij, l):
@@ -135,6 +155,7 @@ class Model(object):
         self.hist_i: uij[3],
         self.sl: uij[4],
         self.lr: l,
+        self.phase: True
         })
     return loss
 
@@ -145,6 +166,7 @@ class Model(object):
         self.j: uij[2],
         self.hist_i: uij[3],
         self.sl: uij[4],
+        self.phase: False
         })
     return u_auc, socre_p_and_n
 
