@@ -132,7 +132,8 @@ class Model(object):
         )
 
     trainable_params = tf.trainable_variables()
-    self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
+#    self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
+    self.opt = tf.train.AdamOptimizer(self.lr)
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
 
