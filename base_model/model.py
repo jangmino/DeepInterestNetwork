@@ -15,6 +15,7 @@ class Model(object):
     self.hist_i = tf.placeholder(tf.int32, [None, None]) # [B, T]
     self.sl = tf.placeholder(tf.int32, [None,]) # [B]
     self.lr = tf.placeholder(tf.float64, [])
+    self.phase = tf.placeholder(tf.bool, name="pholder_phase")
 
     hidden_units = 128
 
@@ -55,22 +56,26 @@ class Model(object):
     hist = h_emb
     hist = tf.reduce_sum(hist, 1) 
     hist = tf.div(hist, tf.cast(tf.tile(tf.expand_dims(self.sl,1), [1,128]), tf.float32))
-    print h_emb.get_shape().as_list()
+    print(h_emb.get_shape().as_list())
     #-- sum end ---------
     
-    hist = tf.layers.batch_normalization(inputs = hist)
+    hist = tf.layers.batch_normalization(inputs = hist, name='bn_hist', training=self.phase)
     hist = tf.reshape(hist, [-1, hidden_units])
     hist = tf.layers.dense(hist, hidden_units)
+    hist = tf.layers.dropout(hist, training=self.phase, name='dropout_hist')
 
     u_emb = hist
     #-- fcn begin -------
     din_i = tf.concat([u_emb, i_emb], axis=-1)
-    din_i = tf.layers.batch_normalization(inputs=din_i, name='b1')
+    din_i = tf.layers.batch_normalization(inputs=din_i, name='bn_din', training=self.phase)
     d_layer_1_i = tf.layers.dense(din_i, 80, activation=tf.nn.sigmoid, name='f1')
+    d_layer_1_i = tf.layers.dropout(d_layer_1_i, training=self.phase, name='dropout_f1')
     d_layer_2_i = tf.layers.dense(d_layer_1_i, 40, activation=tf.nn.sigmoid, name='f2')
+    d_layer_2_i = tf.layers.dropout(d_layer_2_i, training=self.phase, name='dropout_f2')
     d_layer_3_i = tf.layers.dense(d_layer_2_i, 1, activation=None, name='f3')
+    d_layer_3_i = tf.layers.dropout(d_layer_3_i, training=self.phase, name='dropout_f3')
     din_j = tf.concat([u_emb, j_emb], axis=-1)
-    din_j = tf.layers.batch_normalization(inputs=din_j, name='b1', reuse=True)
+    din_j = tf.layers.batch_normalization(inputs=din_j, name='bn_din', reuse=True, training=self.phase, trainable=False)
     d_layer_1_j = tf.layers.dense(din_j, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
     d_layer_2_j = tf.layers.dense(d_layer_1_j, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
     d_layer_3_j = tf.layers.dense(d_layer_2_j, 1, activation=None, name='f3', reuse=True)
@@ -88,7 +93,7 @@ class Model(object):
     all_emb = tf.expand_dims(all_emb, 0)
     all_emb = tf.tile(all_emb, [512, 1, 1])
     din_all = tf.concat([u_emb_all, all_emb], axis=-1)
-    din_all = tf.layers.batch_normalization(inputs=din_all, name='b1', reuse=True)
+    din_all = tf.layers.batch_normalization(inputs=din_all, name='bn_din', reuse=True, training=self.phase, trainable=False)
     d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
     d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
     d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3', reuse=True)
@@ -103,7 +108,7 @@ class Model(object):
     self.score_i = tf.reshape(self.score_i, [-1, 1])
     self.score_j = tf.reshape(self.score_j, [-1, 1])
     self.p_and_n = tf.concat([self.score_i, self.score_j], axis=-1)
-    print self.p_and_n.get_shape().as_list()
+    print(self.p_and_n.get_shape().as_list())
 
 
     # Step variable
@@ -123,8 +128,15 @@ class Model(object):
     self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
-    self.train_op = self.opt.apply_gradients(
+
+    # self.train_op = self.opt.apply_gradients(
+    #     zip(clip_gradients, trainable_params), global_step=self.global_step)
+
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+      self.train_op = self.opt.apply_gradients(
         zip(clip_gradients, trainable_params), global_step=self.global_step)
+
 
 
   def train(self, sess, uij, l):
@@ -135,6 +147,7 @@ class Model(object):
         self.hist_i: uij[3],
         self.sl: uij[4],
         self.lr: l,
+        self.phase: True
         })
     return loss
 
@@ -145,6 +158,7 @@ class Model(object):
         self.j: uij[2],
         self.hist_i: uij[3],
         self.sl: uij[4],
+        self.phase: False
         })
     return u_auc, socre_p_and_n
 
@@ -153,6 +167,7 @@ class Model(object):
         self.u: uid,
         self.hist_i: hist_i,
         self.sl: sl,
+        self.phase: False
         })
 
   def save(self, sess, path):

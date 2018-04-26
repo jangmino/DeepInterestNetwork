@@ -8,7 +8,7 @@ import sys
 from input import DataInput, DataInputTest
 from model import Model
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 random.seed(1234)
 np.random.seed(1234)
 tf.set_random_seed(1234)
@@ -88,6 +88,9 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
   model = Model(user_count, item_count, cate_count, cate_list)
   sess.run(tf.global_variables_initializer())
   sess.run(tf.local_variables_initializer())
+
+  writer = tf.summary.FileWriter('log', sess.graph)
+  writer.close()
 
   print('test_gauc: %.4f\t test_auc: %.4f' % _eval(sess, model))
   sys.stdout.flush()
