@@ -13,7 +13,7 @@ random.seed(1234)
 np.random.seed(1234)
 tf.set_random_seed(1234)
 
-train_batch_size = 32
+train_batch_size = 512
 test_batch_size = 512
 
 with open('dataset.pkl', 'rb') as f:
@@ -69,11 +69,21 @@ def _auc_arr(score):
 def _eval(sess, model):
   auc_sum = 0.0
   score_arr = []
+  total_time = 0
+  total_model = 0
+  start = time.time()
   for _, uij in DataInputTest(test_set, test_batch_size):
+    inf_start = time.time()
     auc_, score_ = model.eval(sess, uij)
+    inf_end = time.time()
+    total_model += inf_end - inf_start
     score_arr += _auc_arr(score_)
     auc_sum += auc_ * len(uij[0])
   test_gauc = auc_sum / len(test_set)
+  total_time += (time.time() - start)
+  sys.stderr.write("Elapsed total {}: model {}\n".format(total_time, total_model))
+  sys.stderr.flush()
+
   Auc = calc_auc(score_arr)
   global best_auc
   if best_auc < test_gauc:
@@ -106,11 +116,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
       loss = model.train(sess, uij, lr)
       loss_sum += loss
 
-      if model.global_step.eval() % 1000 == 0:
+      if model.global_step.eval() % 100 == 0:
         test_gauc, Auc = _eval(sess, model)
         print('Epoch %d Global_step %d\tTrain_loss: %.4f\tEval_GAUC: %.4f\tEval_AUC: %.4f' %
               (model.global_epoch_step.eval(), model.global_step.eval(),
-               loss_sum / 1000, test_gauc, Auc))
+               loss_sum / 100, test_gauc, Auc))
         sys.stdout.flush()
         loss_sum = 0.0
 
