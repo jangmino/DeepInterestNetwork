@@ -13,7 +13,7 @@ random.seed(1234)
 np.random.seed(1234)
 tf.set_random_seed(1234)
 
-train_batch_size = 512
+train_batch_size = 32
 test_batch_size = 512
 
 with open('dataset.pkl', 'rb') as f:
@@ -116,11 +116,11 @@ with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
       loss = model.train(sess, uij, lr)
       loss_sum += loss
 
-      if model.global_step.eval() % 100 == 0:
+      if model.global_step.eval() % 1000 == 0:
         test_gauc, Auc = _eval(sess, model)
         print('Epoch %d Global_step %d\tTrain_loss: %.4f\tEval_GAUC: %.4f\tEval_AUC: %.4f' %
               (model.global_epoch_step.eval(), model.global_step.eval(),
-               loss_sum / 100, test_gauc, Auc))
+               loss_sum / 1000, test_gauc, Auc))
         sys.stdout.flush()
         loss_sum = 0.0
 
