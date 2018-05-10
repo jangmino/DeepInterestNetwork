@@ -6,16 +6,18 @@ class Model(object):
 
   def __init__(self, user_count, item_count, cate_count, cate_list, use_dice=False):
 
-    self.u = tf.placeholder(tf.int32, [None,]) # [B]
-    self.i = tf.placeholder(tf.int32, [None,]) # [B]
-    self.j = tf.placeholder(tf.int32, [None,]) # [B]
-    self.y = tf.placeholder(tf.float32, [None,]) # [B]
-    self.hist_i = tf.placeholder(tf.int32, [None, None]) # [B, T]
-    self.sl = tf.placeholder(tf.int32, [None,]) # [B]
-    self.lr = tf.placeholder(tf.float64, [])
+    self.u = tf.placeholder(tf.int32, [None,], name="ph_u") # [B]
+    self.i = tf.placeholder(tf.int32, [None,], name="ph_i") # [B]
+    self.j = tf.placeholder(tf.int32, [None,], name="ph_j") # [B]
+    self.y = tf.placeholder(tf.float32, [None,], name="ph_y") # [B]
+    self.hist_i = tf.placeholder(tf.int32, [None, None], name="ph_hist_i") # [B, T]
+    self.sl = tf.placeholder(tf.int32, [None,], name="ph_sl") # [B]
+    self.lr = tf.placeholder(tf.float64, [], name="ph_lr")
     self.phase = tf.placeholder(tf.bool, name="pholder_phase")
 
     hidden_units = 128
+
+    B = tf.shape(self.u)[0]
 
     user_emb_w = tf.get_variable("user_emb_w", [user_count, hidden_units])
     item_emb_w = tf.get_variable("item_emb_w", [item_count, hidden_units // 2])
@@ -46,12 +48,12 @@ class Model(object):
         tf.nn.embedding_lookup(cate_emb_w, hc),
         ], axis=2)
 
-    hist =attention(i_emb, h_emb, self.sl) # [B, 1, H]
+    hist = attention(i_emb, h_emb, self.sl, reuse=False) # [B, 1, H]
     #-- attention end ---
 
     hist = tf.layers.batch_normalization(inputs=hist, name='bn_hist', training=self.phase)
     hist = tf.reshape(hist, [-1, hidden_units])
-    hist = tf.layers.dense(hist, hidden_units)
+    hist = tf.layers.dense(hist, hidden_units, name='dense_hist')
 
     u_emb = hist
     print(u_emb.get_shape().as_list())
@@ -71,7 +73,14 @@ class Model(object):
 
     d_layer_3_i = tf.layers.dense(d_layer_2_i, 1, activation=None, name='f3')
 
-    din_j = tf.concat([u_emb, j_emb], axis=-1)
+    hist_j = attention(j_emb, h_emb, self.sl, reuse=True)
+    hist_j = tf.layers.batch_normalization(inputs=hist_j, name='bn_hist', reuse=True, training=self.phase, trainable=False)
+    hist_j = tf.reshape(hist_j, [-1, hidden_units])
+    hist_j = tf.layers.dense(hist_j, hidden_units, name='dense_hist', reuse=True)
+
+    uj_emb = hist_j
+
+    din_j = tf.concat([uj_emb, j_emb], axis=-1)
     din_j = tf.layers.batch_normalization(inputs=din_j, name='bn_din', reuse=True, training=self.phase, trainable=False)
     if use_dice:
       d_layer_1_j = tf.layers.dense(din_j, 80, activation=None, name='f1', reuse=True)
@@ -87,19 +96,31 @@ class Model(object):
     d_layer_3_j = tf.reshape(d_layer_3_j, [-1])
     x = i_b - j_b + d_layer_3_i - d_layer_3_j # [B]
     self.logits = i_b + d_layer_3_i
-    u_emb_all = tf.expand_dims(u_emb, 1)
-    u_emb_all = tf.tile(u_emb_all, [1, item_count, 1])
-    # logits for all item:
+
+    # predicting for each user over all items.
     all_emb = tf.concat([
         item_emb_w,
         tf.nn.embedding_lookup(cate_emb_w, cate_list)
         ], axis=1)
-    all_emb = tf.expand_dims(all_emb, 0)
-    all_emb = tf.tile(all_emb, [512, 1, 1])
-    din_all = tf.concat([u_emb_all, all_emb], axis=-1)
+    all_emb = tf.tile(all_emb, [B, 1]) # [B*I, H]
+
+    h_emb_all = tf.expand_dims(h_emb, 1)
+    h_emb_all = tf.tile(h_emb_all, [1, item_count, 1, 1])
+    h_emb_all = tf.reshape(h_emb_all, [-1, tf.shape(h_emb)[1], hidden_units]) #[B*I, T, H]
+
+    sl_all = tf.expand_dims(self.sl, 1)
+    sl_all = tf.tile(sl_all, [1, item_count])
+    sl_all = tf.reshape(sl_all, [-1]) #[B*I,]
+
+    hist_all = attention(all_emb, h_emb_all, sl_all, reuse=True)
+    hist_all = tf.layers.batch_normalization(inputs=hist_all, name='bn_hist', reuse=True, training=self.phase, trainable=False)
+    hist_all = tf.reshape(hist_all, [-1, hidden_units])
+    hist_all = tf.layers.dense(hist_all, hidden_units, name='dense_hist', reuse=True)
+
+    uall_emb = hist_all
+    din_all = tf.concat([uall_emb, all_emb], axis=-1)
     din_all = tf.layers.batch_normalization(inputs=din_all, name='bn_din', reuse=True, training=self.phase,
                                             trainable=False)
-
     if use_dice:
       d_layer_1_all = tf.layers.dense(din_all, 80, activation=None, name='f1', reuse=True)
       d_layer_1_all = dice(d_layer_1_all, name='dice_1_i', training=self.phase, trainable=False, reuse=True)
@@ -110,11 +131,10 @@ class Model(object):
       d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
 
     d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3', reuse=True)
-    d_layer_3_all = tf.reshape(d_layer_3_all, [-1, item_count])
+    d_layer_3_all = tf.reshape(d_layer_3_all, [-1, item_count]) # [B, I]
     self.logits_all = tf.sigmoid(item_b + d_layer_3_all)
     #-- fcn end -------
 
-    
     self.mf_auc = tf.reduce_mean(tf.to_float(x > 0))
     self.score_i = tf.sigmoid(i_b + d_layer_3_i)
     self.score_j = tf.sigmoid(j_b + d_layer_3_j)
@@ -193,7 +213,7 @@ def extract_axis_1(data, ind):
   res = tf.gather_nd(data, indices)
   return res
 
-def attention(queries, keys, keys_length):
+def attention(queries, keys, keys_length, reuse=False):
   '''
     queries:     [B, H]
     keys:        [B, T, H]
@@ -203,9 +223,9 @@ def attention(queries, keys, keys_length):
   queries = tf.tile(queries, [1, tf.shape(keys)[1]])
   queries = tf.reshape(queries, [-1, tf.shape(keys)[1], queries_hidden_units])
   din_all = tf.concat([queries, keys, queries-keys, queries*keys], axis=-1)
-  d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1_att')
-  d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2_att')
-  d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3_att')
+  d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1_att', reuse=reuse)
+  d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2_att', reuse=reuse)
+  d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3_att', reuse=reuse)
   d_layer_3_all = tf.reshape(d_layer_3_all, [-1, 1, tf.shape(keys)[1]])
   outputs = d_layer_3_all 
   # Mask
