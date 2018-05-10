@@ -19,6 +19,8 @@ class Model(object):
 
     hidden_units = 128
 
+    B = tf.shape(self.u)[0]
+
     user_emb_w = tf.get_variable("user_emb_w", [user_count, hidden_units])
     item_emb_w = tf.get_variable("item_emb_w", [item_count, hidden_units // 2])
     item_b = tf.get_variable("item_b", [item_count],
@@ -91,7 +93,7 @@ class Model(object):
         tf.nn.embedding_lookup(cate_emb_w, cate_list)
         ], axis=1)
     all_emb = tf.expand_dims(all_emb, 0)
-    all_emb = tf.tile(all_emb, [512, 1, 1])
+    all_emb = tf.tile(all_emb, [B, 1, 1])
     din_all = tf.concat([u_emb_all, all_emb], axis=-1)
     din_all = tf.layers.batch_normalization(inputs=din_all, name='bn_din', reuse=True, training=self.phase, trainable=False)
     d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
@@ -125,7 +127,8 @@ class Model(object):
         )
 
     trainable_params = tf.trainable_variables()
-    self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
+    #self.opt = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
+    self.opt = tf.train.AdamOptimizer()
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
 
