@@ -131,12 +131,12 @@ def _predict(sess, model):
         hist = list(map(lambda x: wepick_data['deal_key'][x], histories[k][0:lengths[k]]))
         sort_i = np.argsort(predicted[k,:])
         sort_i = np.fliplr([sort_i])[0]
-        order = list(map(lambda x: (wepick_data['deal_key'][x], predicted[k, x]), sort_i))
+        order = list(map(lambda x: (wepick_data['deal_key'][x], wepick_data['deal_slot'][wepick_data['deal_key'][x]], predicted[k, x]), sort_i))
         outputs.append((u, hist, order))
 
       for u, hist, order in outputs:
         h = "-".join(map(lambda x: str(x), hist))
-        s = ":".join(map(lambda x: "{}/{:.2f}".format(x[0], x[1]), order[:30]))
+        s = ":".join(map(lambda x: "{}/{}/{:.2f}".format(x[0], x[1], x[2]), order[:30]))
         pred_f.write("{},{},{}\n".format(u, h, s))
     #
 
@@ -161,23 +161,26 @@ def main(_):
     sys.stdout.flush()
     lr = 1.0
     start_time = time.time()
-    for _ in range(50):
+    for _ in range(FLAGS.num_epochs):
 
       random.shuffle(train_set)
 
       epoch_size = round(len(train_set) / FLAGS.batch_size)
       loss_sum = 0.0
+      loss_count = 0
       for _, uij in DataInput(train_set, FLAGS.batch_size):
         loss = model.train(sess, uij, lr)
         loss_sum += loss
+        loss_count += 1
 
         if model.global_step.eval() % 1000 == 0:
           test_gauc, Auc = _eval(sess, model)
           print('Epoch %d Global_step %d\tTrain_loss: %.4f\tEval_GAUC: %.4f\tEval_AUC: %.4f' %
                 (model.global_epoch_step.eval(), model.global_step.eval(),
-                 loss_sum / 1000, test_gauc, Auc))
+                 loss_sum / loss_count, test_gauc, Auc))
           sys.stdout.flush()
           loss_sum = 0.0
+          loss_count = 0
 
         if model.global_step.eval() % 336000 == 0:
           lr = 0.1
@@ -198,12 +201,17 @@ if __name__ == "__main__":
   parser.add_argument(
       "--batch_size",
       type=int,
-      default=32,
+      default=512,
       help="Batch size for training.")
+  parser.add_argument(
+      "--num_epochs",
+      type=int,
+      default=10,
+      help="number of training epochs.")
   parser.add_argument(
       "--predict_batch_size",
       type=int,
-      default=16,
+      default=64,
       help="Batch size for predicting.")
   parser.add_argument(
       "--learning_rate",
@@ -213,7 +221,7 @@ if __name__ == "__main__":
   parser.add_argument(
       "--testonly",
       action="store_true",
-      default=True,
+      default=False,
       help="Test Prediction Only. It will use the restored model.")
   parser.add_argument(
       "--pred_out_path",
