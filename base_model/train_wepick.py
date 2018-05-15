@@ -109,6 +109,21 @@ def restore_info(uij, predicted, dic):
   for i in range(len(iu[0])):
     u = dic['deal_key'][iu[i]]
 
+def inspect_item_b(sess, model):
+  with open('wepick_data.pkl', 'rb') as f:
+    wepick_data = pickle.load(f)
+
+  item_b = model.prob_item_b(sess)
+  sort_i = np.argsort(item_b)
+  sort_i = np.fliplr([sort_i])[0]
+
+  item_b_dic = list(zip(list(map(lambda x: wepick_data['deal_key'][x], sort_i)), item_b[sort_i]))
+
+  with open("./item_b.csv", 'w') as item_b_f:
+    for i,s in item_b_dic:
+      item_b_f.write("{},{}\n".format(i, s))
+
+
 def _predict(sess, model):
   with open('wepick_data.pkl', 'rb') as f:
     wepick_data = pickle.load(f)
@@ -119,7 +134,7 @@ def _predict(sess, model):
   start = time.time()
 
   with open(FLAGS.pred_out_path, 'w') as pred_f:
-    for _, uij in DataInputTest(test_set, test_batch_size):
+    for _, uij in DataInputTest(test_set, FLAGS.predict_batch_size):
       outputs = []
       inf_start = time.time()
       users, histories, lengths = uij[0], uij[3], uij[4]
@@ -127,17 +142,21 @@ def _predict(sess, model):
       inf_end = time.time()
       total_model += inf_end - inf_start
 
+      # x: 간접 딜인덱스
+      # wepick_data['deal_key']: 직접 딜번호
       for k in range(len(users)):
         u = wepick_data['user_key'][users[k]]
         hist = list(map(lambda x: wepick_data['deal_key'][x], histories[k][0:lengths[k]]))
         sort_i = np.argsort(predicted[k,:])
         sort_i = np.fliplr([sort_i])[0]
-        order = list(map(lambda x: (wepick_data['deal_key'][x], predicted[k, x]), sort_i))
+        order = list(filter(lambda x: x[1] >= FLAGS.predict_slot_after,
+          map(lambda x: (wepick_data['deal_key'][x], wepick_data['deal_slot'][wepick_data['deal_key'][x]], predicted[k, x]), sort_i))
+        )
         outputs.append((u, hist, order))
 
       for u, hist, order in outputs:
         h = "-".join(map(lambda x: str(x), hist))
-        s = ":".join(map(lambda x: "{}/{:.2f}".format(x[0], x[1]), order[:30]))
+        s = ":".join(map(lambda x: "{}/{}/{:.2f}".format(x[0], x[1], x[2]), order[:30]))
         pred_f.write("{},{},{}\n".format(u, h, s))
     #
 
@@ -151,6 +170,11 @@ def main(_):
     model = Model(user_count, item_count, cate_count, cate_list)
     sess.run(tf.global_variables_initializer())
     sess.run(tf.local_variables_initializer())
+
+    if FLAGS.inspect_item_b:
+      model.restore(sess, 'save_path/ckpt')
+      inspect_item_b(sess, model)
+      return 0
 
     if FLAGS.testonly:
       model.restore(sess, 'save_path/ckpt')
@@ -169,17 +193,21 @@ def main(_):
 
       epoch_size = round(len(train_set) / FLAGS.batch_size)
       loss_sum = 0.0
+      loss_count = 0
       for _, uij in DataInput(train_set, FLAGS.batch_size):
-        loss = model.train(sess, uij, lr)
+        summary, loss = model.train(sess, uij, lr)
         loss_sum += loss
+        loss_count += 1
 
         if model.global_step.eval() % 100 == 0:
           test_gauc, Auc = _eval(sess, model)
+          writer.add_summary(summary, model.global_step.eval())
           print('Epoch %d Global_step %d\tTrain_loss: %.4f\tEval_GAUC: %.4f\tEval_AUC: %.4f' %
                 (model.global_epoch_step.eval(), model.global_step.eval(),
-                 loss_sum / 100, test_gauc, Auc))
+                 loss_sum / loss_count, test_gauc, Auc))
           sys.stdout.flush()
           loss_sum = 0.0
+          loss_count = 0
 
         if model.global_step.eval() % 336000 == 0:
           lr = 0.1
@@ -189,6 +217,7 @@ def main(_):
       sys.stdout.flush()
       model.global_epoch_step_op.eval()
 
+    writer.close()
     print('best test_gauc:', best_auc)
     sys.stdout.flush()
 
@@ -208,6 +237,16 @@ if __name__ == "__main__":
       default=10,
       help="number of training epochs.")
   parser.add_argument(
+      "--predict_batch_size",
+      type=int,
+      default=512,
+      help="Batch size for predicting.")
+  parser.add_argument(
+      "--predict_slot_after",
+      type=int,
+      default=21,
+      help="When predicting, slots after this number will be considered as candidates.")
+  parser.add_argument(
       "--learning_rate",
       type=float,
       default=0.001,
@@ -218,10 +257,20 @@ if __name__ == "__main__":
       default=True,
       help="Test Prediction Only. It will use the restored model.")
   parser.add_argument(
+      "--inspect_item_b",
+      action="store_true",
+      default=True,
+      help="Inspect item_b. and the result will be written to './item_b.csv'. (It eats up all options).")
+  parser.add_argument(
       "--pred_out_path",
       type=str,
       default="./wepick_pred.csv",
       help="Directory to write precition")
+  parser.add_argument(
+      "--architecture",
+      type=str,
+      default="128,64,32",
+      help="embed_dim,f1_dim,f2_dim")
 
   FLAGS, unparsed = parser.parse_known_args()
 

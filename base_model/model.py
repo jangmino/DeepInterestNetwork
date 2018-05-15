@@ -21,28 +21,25 @@ class Model(object):
 
     B = tf.shape(self.u)[0]
 
-    user_emb_w = tf.get_variable("user_emb_w", [user_count, hidden_units])
     item_emb_w = tf.get_variable("item_emb_w", [item_count, hidden_units // 2])
-    item_b = tf.get_variable("item_b", [item_count],
+    self.item_b = tf.get_variable("item_b", [item_count],
                              initializer=tf.constant_initializer(0.0))
     cate_emb_w = tf.get_variable("cate_emb_w", [cate_count, hidden_units // 2])
     cate_list = tf.convert_to_tensor(cate_list, dtype=tf.int64)
-
-    u_emb = tf.nn.embedding_lookup(user_emb_w, self.u)
 
     ic = tf.gather(cate_list, self.i)
     i_emb = tf.concat(values = [
         tf.nn.embedding_lookup(item_emb_w, self.i),
         tf.nn.embedding_lookup(cate_emb_w, ic),
         ], axis=1)
-    i_b = tf.gather(item_b, self.i)
+    i_b = tf.gather(self.item_b, self.i)
 
     jc = tf.gather(cate_list, self.j)
     j_emb = tf.concat([
         tf.nn.embedding_lookup(item_emb_w, self.j),
         tf.nn.embedding_lookup(cate_emb_w, jc),
         ], axis=1)
-    j_b = tf.gather(item_b, self.j)
+    j_b = tf.gather(self.item_b, self.j)
 
     hc = tf.gather(cate_list, self.hist_i)
     h_emb = tf.concat([
@@ -100,7 +97,7 @@ class Model(object):
     d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
     d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3', reuse=True)
     d_layer_3_all = tf.reshape(d_layer_3_all, [-1, item_count])
-    self.logits_all = tf.sigmoid(item_b + d_layer_3_all)
+    self.logits_all = tf.sigmoid(self.item_b + d_layer_3_all)
     #-- fcn end -------
 
     
@@ -132,6 +129,10 @@ class Model(object):
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
 
+    tf.summary.histogram('item_b', self.item_b)
+    tf.summary.scalar('loss', self.loss)
+    self.merged = tf.summary.merge_all()
+
     # self.train_op = self.opt.apply_gradients(
     #     zip(clip_gradients, trainable_params), global_step=self.global_step)
 
@@ -143,7 +144,7 @@ class Model(object):
 
 
   def train(self, sess, uij, l):
-    loss, _ = sess.run([self.loss, self.train_op], feed_dict={
+    merged, loss, _ = sess.run([self.merged, self.loss, self.train_op], feed_dict={
         self.u: uij[0],
         self.i: uij[1],
         self.y: uij[2],
@@ -152,7 +153,7 @@ class Model(object):
         self.lr: l,
         self.phase: True
         })
-    return loss
+    return merged, loss
 
   def eval(self, sess, uij):
     u_auc, socre_p_and_n = sess.run([self.mf_auc, self.p_and_n], feed_dict={
@@ -170,6 +171,11 @@ class Model(object):
         self.u: uid,
         self.hist_i: hist_i,
         self.sl: sl,
+        self.phase: False
+        })
+
+  def prob_item_b(self, sess):
+    return sess.run(self.item_b, feed_dict={
         self.phase: False
         })
 

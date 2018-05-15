@@ -131,7 +131,9 @@ def _predict(sess, model):
         hist = list(map(lambda x: wepick_data['deal_key'][x], histories[k][0:lengths[k]]))
         sort_i = np.argsort(predicted[k,:])
         sort_i = np.fliplr([sort_i])[0]
-        order = list(map(lambda x: (wepick_data['deal_key'][x], wepick_data['deal_slot'][wepick_data['deal_key'][x]], predicted[k, x]), sort_i))
+        order = list(filter(lambda x: x[1] >= FLAGS.predict_slot_after,
+          map(lambda x: (wepick_data['deal_key'][x], wepick_data['deal_slot'][wepick_data['deal_key'][x]], predicted[k, x]), sort_i))
+        )
         outputs.append((u, hist, order))
 
       for u, hist, order in outputs:
@@ -142,6 +144,7 @@ def _predict(sess, model):
 
   total_time += (time.time() - start)
   sys.stderr.write("Elapsed total {}: model {}\n".format(total_time, total_model))
+
 def main(_):
   gpu_options = tf.GPUOptions(allow_growth=True)
   with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
@@ -169,12 +172,13 @@ def main(_):
       loss_sum = 0.0
       loss_count = 0
       for _, uij in DataInput(train_set, FLAGS.batch_size):
-        loss = model.train(sess, uij, lr)
+        summary, loss = model.train(sess, uij, lr)
         loss_sum += loss
         loss_count += 1
 
         if model.global_step.eval() % 1000 == 0:
           test_gauc, Auc = _eval(sess, model)
+          writer.add_summary(summary, model.global_step.eval())
           print('Epoch %d Global_step %d\tTrain_loss: %.4f\tEval_GAUC: %.4f\tEval_AUC: %.4f' %
                 (model.global_epoch_step.eval(), model.global_step.eval(),
                  loss_sum / loss_count, test_gauc, Auc))
@@ -214,6 +218,11 @@ if __name__ == "__main__":
       default=64,
       help="Batch size for predicting.")
   parser.add_argument(
+      "--predict_slot_after",
+      type=int,
+      default=21,
+      help="When predicting, slots after this number will be considered as candidates.")
+  parser.add_argument(
       "--learning_rate",
       type=float,
       default=0.001,
@@ -221,7 +230,7 @@ if __name__ == "__main__":
   parser.add_argument(
       "--testonly",
       action="store_true",
-      default=False,
+      default=True,
       help="Test Prediction Only. It will use the restored model.")
   parser.add_argument(
       "--pred_out_path",

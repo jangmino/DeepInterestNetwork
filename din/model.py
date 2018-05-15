@@ -163,13 +163,17 @@ class Model(object):
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
 
+    tf.summary.histogram('item_b', item_b)
+    tf.summary.scalar('loss', self.loss)
+    self.merged = tf.summary.merge_all()
+
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
       self.train_op = self.opt.apply_gradients(
         zip(clip_gradients, trainable_params), global_step=self.global_step)
 
   def train(self, sess, uij, l):
-    loss, _ = sess.run([self.loss, self.train_op], feed_dict={
+    merged, loss, _ = sess.run([self.merged, self.loss, self.train_op], feed_dict={
         self.u: uij[0],
         self.i: uij[1],
         self.y: uij[2],
@@ -178,7 +182,7 @@ class Model(object):
         self.lr: l,
         self.phase: True
         })
-    return loss
+    return merged, loss
 
   def eval(self, sess, uij):
     u_auc, socre_p_and_n = sess.run([self.mf_auc, self.p_and_n], feed_dict={
