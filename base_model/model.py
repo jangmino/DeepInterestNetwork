@@ -6,7 +6,7 @@ from tensorflow.python.ops.rnn_cell import MultiRNNCell
 
 class Model(object):
 
-  def __init__(self, user_count, item_count, cate_count, cate_list):
+  def __init__(self, user_count, item_count, cate_count, cate_list, arch_dict, use_i_emb = True):
 
     self.u = tf.placeholder(tf.int32, [None,]) # [B]
     self.i = tf.placeholder(tf.int32, [None,]) # [B]
@@ -17,35 +17,43 @@ class Model(object):
     self.lr = tf.placeholder(tf.float64, [])
     self.phase = tf.placeholder(tf.bool, name="pholder_phase")
 
-    hidden_units = 128
+    hidden_units = arch_dict['emb_dim']
+    f1_dim = arch_dict['f1_dim']
+    f2_dim = arch_dict['f2_dim']
 
     B = tf.shape(self.u)[0]
 
-    item_emb_w = tf.get_variable("item_emb_w", [item_count, hidden_units // 2])
-    self.item_b = tf.get_variable("item_b", [item_count],
+    if use_i_emb:
+      item_emb_w = tf.get_variable("item_emb_w", [item_count, hidden_units // 2])
+      self.item_b = tf.get_variable("item_b", [item_count],
                              initializer=tf.constant_initializer(0.0))
-    cate_emb_w = tf.get_variable("cate_emb_w", [cate_count, hidden_units // 2])
+
+    cate_emb_w = tf.get_variable("cate_emb_w", [cate_count, hidden_units // 2 if use_i_emb else hidden_units ])
     cate_list = tf.convert_to_tensor(cate_list, dtype=tf.int64)
 
     ic = tf.gather(cate_list, self.i)
-    i_emb = tf.concat(values = [
-        tf.nn.embedding_lookup(item_emb_w, self.i),
-        tf.nn.embedding_lookup(cate_emb_w, ic),
-        ], axis=1)
-    i_b = tf.gather(self.item_b, self.i)
-
     jc = tf.gather(cate_list, self.j)
-    j_emb = tf.concat([
+    hc = tf.gather(cate_list, self.hist_i)
+
+    if use_i_emb:
+      i_emb = tf.concat(values = [
+          tf.nn.embedding_lookup(item_emb_w, self.i),
+          tf.nn.embedding_lookup(cate_emb_w, ic),
+          ], axis=1)
+      i_b = tf.gather(self.item_b, self.i)
+      j_emb = tf.concat([
         tf.nn.embedding_lookup(item_emb_w, self.j),
         tf.nn.embedding_lookup(cate_emb_w, jc),
-        ], axis=1)
-    j_b = tf.gather(self.item_b, self.j)
-
-    hc = tf.gather(cate_list, self.hist_i)
-    h_emb = tf.concat([
+      ], axis=1)
+      j_b = tf.gather(self.item_b, self.j)
+      h_emb = tf.concat([
         tf.nn.embedding_lookup(item_emb_w, self.hist_i),
         tf.nn.embedding_lookup(cate_emb_w, hc),
-        ], axis=2)
+      ], axis=2)
+    else:
+      i_emb = tf.nn.embedding_lookup(cate_emb_w, ic)
+      j_emb = tf.nn.embedding_lookup(cate_emb_w, jc)
+      h_emb = tf.nn.embedding_lookup(cate_emb_w, hc)
 
     #-- sum begin -------
     mask = tf.sequence_mask(self.sl, tf.shape(h_emb)[1], dtype=tf.float32) # [B, T]
@@ -54,7 +62,7 @@ class Model(object):
     h_emb *= mask # [B, T, H]
     hist = h_emb
     hist = tf.reduce_sum(hist, 1) 
-    hist = tf.div(hist, tf.cast(tf.tile(tf.expand_dims(self.sl,1), [1,128]), tf.float32))
+    hist = tf.div(hist, tf.cast(tf.tile(tf.expand_dims(self.sl,1), [1, hidden_units]), tf.float32))
     print(h_emb.get_shape().as_list())
     #-- sum end ---------
     
@@ -67,43 +75,61 @@ class Model(object):
     #-- fcn begin -------
     din_i = tf.concat([u_emb, i_emb], axis=-1)
     din_i = tf.layers.batch_normalization(inputs=din_i, name='bn_din', training=self.phase)
-    d_layer_1_i = tf.layers.dense(din_i, 80, activation=tf.nn.sigmoid, name='f1')
+    d_layer_1_i = tf.layers.dense(din_i, f1_dim, activation=tf.nn.sigmoid, name='f1')
     d_layer_1_i = tf.layers.dropout(d_layer_1_i, training=self.phase, name='dropout_f1')
-    d_layer_2_i = tf.layers.dense(d_layer_1_i, 40, activation=tf.nn.sigmoid, name='f2')
+    d_layer_2_i = tf.layers.dense(d_layer_1_i, f2_dim, activation=tf.nn.sigmoid, name='f2')
     d_layer_2_i = tf.layers.dropout(d_layer_2_i, training=self.phase, name='dropout_f2')
     d_layer_3_i = tf.layers.dense(d_layer_2_i, 1, activation=None, name='f3')
     d_layer_3_i = tf.layers.dropout(d_layer_3_i, training=self.phase, name='dropout_f3')
     din_j = tf.concat([u_emb, j_emb], axis=-1)
     din_j = tf.layers.batch_normalization(inputs=din_j, name='bn_din', reuse=True, training=self.phase, trainable=False)
-    d_layer_1_j = tf.layers.dense(din_j, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
-    d_layer_2_j = tf.layers.dense(d_layer_1_j, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
+    d_layer_1_j = tf.layers.dense(din_j, f1_dim, activation=tf.nn.sigmoid, name='f1', reuse=True)
+    d_layer_2_j = tf.layers.dense(d_layer_1_j, f2_dim, activation=tf.nn.sigmoid, name='f2', reuse=True)
     d_layer_3_j = tf.layers.dense(d_layer_2_j, 1, activation=None, name='f3', reuse=True)
     d_layer_3_i = tf.reshape(d_layer_3_i, [-1])
     d_layer_3_j = tf.reshape(d_layer_3_j, [-1])
-    x = i_b - j_b + d_layer_3_i - d_layer_3_j # [B]
-    self.logits = i_b + d_layer_3_i
+
+    if use_i_emb:
+      x = i_b - j_b + d_layer_3_i - d_layer_3_j # [B]
+      self.logits = i_b + d_layer_3_i
+    else:
+      x = d_layer_3_i - d_layer_3_j # [B]
+      self.logits = d_layer_3_i
+
     u_emb_all = tf.expand_dims(u_emb, 1)
     u_emb_all = tf.tile(u_emb_all, [1, item_count, 1])
     # logits for all item:
-    all_emb = tf.concat([
-        item_emb_w,
-        tf.nn.embedding_lookup(cate_emb_w, cate_list)
-        ], axis=1)
+
+    if use_i_emb:
+      all_emb = tf.concat([
+          item_emb_w,
+          tf.nn.embedding_lookup(cate_emb_w, cate_list)
+          ], axis=1)
+    else:
+      all_emb = tf.nn.embedding_lookup(cate_emb_w, cate_list)
+
     all_emb = tf.expand_dims(all_emb, 0)
     all_emb = tf.tile(all_emb, [B, 1, 1])
     din_all = tf.concat([u_emb_all, all_emb], axis=-1)
     din_all = tf.layers.batch_normalization(inputs=din_all, name='bn_din', reuse=True, training=self.phase, trainable=False)
-    d_layer_1_all = tf.layers.dense(din_all, 80, activation=tf.nn.sigmoid, name='f1', reuse=True)
-    d_layer_2_all = tf.layers.dense(d_layer_1_all, 40, activation=tf.nn.sigmoid, name='f2', reuse=True)
+    d_layer_1_all = tf.layers.dense(din_all, f1_dim, activation=tf.nn.sigmoid, name='f1', reuse=True)
+    d_layer_2_all = tf.layers.dense(d_layer_1_all, f2_dim, activation=tf.nn.sigmoid, name='f2', reuse=True)
     d_layer_3_all = tf.layers.dense(d_layer_2_all, 1, activation=None, name='f3', reuse=True)
     d_layer_3_all = tf.reshape(d_layer_3_all, [-1, item_count])
-    self.logits_all = tf.sigmoid(self.item_b + d_layer_3_all)
+    if use_i_emb:
+      self.logits_all = tf.sigmoid(self.item_b + d_layer_3_all)
+    else:
+      self.logits_all = tf.sigmoid(d_layer_3_all)
     #-- fcn end -------
 
     
     self.mf_auc = tf.reduce_mean(tf.to_float(x > 0))
-    self.score_i = tf.sigmoid(i_b + d_layer_3_i)
-    self.score_j = tf.sigmoid(j_b + d_layer_3_j)
+    if use_i_emb:
+      self.score_i = tf.sigmoid(i_b + d_layer_3_i)
+      self.score_j = tf.sigmoid(j_b + d_layer_3_j)
+    else:
+      self.score_i = tf.sigmoid(d_layer_3_i)
+      self.score_j = tf.sigmoid(d_layer_3_j)
     self.score_i = tf.reshape(self.score_i, [-1, 1])
     self.score_j = tf.reshape(self.score_j, [-1, 1])
     self.p_and_n = tf.concat([self.score_i, self.score_j], axis=-1)
@@ -129,7 +155,8 @@ class Model(object):
     gradients = tf.gradients(self.loss, trainable_params)
     clip_gradients, _ = tf.clip_by_global_norm(gradients, 5)
 
-    tf.summary.histogram('item_b', self.item_b)
+    if use_i_emb:
+      tf.summary.histogram('item_b', self.item_b)
     tf.summary.scalar('loss', self.loss)
     self.merged = tf.summary.merge_all()
 

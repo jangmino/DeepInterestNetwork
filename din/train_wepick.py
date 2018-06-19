@@ -108,6 +108,20 @@ def restore_info(uij, predicted, dic):
   for i in range(len(iu[0])):
     u = dic['deal_key'][iu[i]]
 
+def inspect_item_b(sess, model):
+  with open('wepick_data.pkl', 'rb') as f:
+    wepick_data = pickle.load(f)
+
+  item_b = model.prob_item_b(sess)
+  sort_i = np.argsort(item_b)
+  sort_i = np.fliplr([sort_i])[0]
+
+  item_b_dic = list(zip(list(map(lambda x: wepick_data['deal_key'][x], sort_i)), item_b[sort_i]))
+
+  with open("./item_b.csv", 'w') as item_b_f:
+    for i,s in item_b_dic:
+      item_b_f.write("{},{}\n".format(i, s))
+
 def _predict(sess, model):
   with open('wepick_data.pkl', 'rb') as f:
     wepick_data = pickle.load(f)
@@ -152,6 +166,11 @@ def main(_):
     model = Model(user_count, item_count, cate_count, cate_list, use_dice=True)
     sess.run(tf.global_variables_initializer())
     sess.run(tf.local_variables_initializer())
+
+    if FLAGS.inspect_item_b:
+      model.restore(sess, 'save_path/ckpt')
+      inspect_item_b(sess, model)
+      return 0
 
     if FLAGS.testonly:
       model.restore(sess, 'save_path/ckpt')
@@ -230,8 +249,13 @@ if __name__ == "__main__":
   parser.add_argument(
       "--testonly",
       action="store_true",
-      default=True,
+      default=False,
       help="Test Prediction Only. It will use the restored model.")
+  parser.add_argument(
+      "--inspect_item_b",
+      action="store_true",
+      default=True,
+      help="Inspect item_b. and the result will be written to './item_b.csv'. (It eats up all options).")
   parser.add_argument(
       "--pred_out_path",
       type=str,
